@@ -26,7 +26,7 @@ if not options.out:
     options.out = input + ".gource"
 output = options.out
 
-p4_entry = re.compile("^Change \d+ by (?P<author>\w+)@\S+ on (?P<timestamp>\S+ \S+)\s*$")
+p4_entry = re.compile("^Change \d+ by (?P<author>[^@]+)@\S+ on (?P<timestamp>\S+ \S+)\s*$")
 p4_affected_files = re.compile("^Affected files ...\s*$")
 p4_file = re.compile("^... (?P<file>%s[^#]+)#\d+ (?P<action>\w+)\s*$" % options.filter)
 
