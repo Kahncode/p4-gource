@@ -1,5 +1,7 @@
 # Perforce to gource change log converter
 
+Full story is at https://max0x7ba.blogspot.com/2010/05/visualize-perforce-change-log-with.html
+
 ## Usage
 
 ```
