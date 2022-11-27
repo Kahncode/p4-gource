@@ -1,6 +1,6 @@
-Perforce to gource change log converter
+# Perforce to gource change log converter
 
-Usage in bash:
+## Usage
 
 ```
 $ head=$(p4 changes -m 1 | awk '{print $2}')
