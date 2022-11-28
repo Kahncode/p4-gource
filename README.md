@@ -10,7 +10,7 @@ $ p4_head=$(p4 changes -m 1 | { read -a words && echo ${words[1]}; })
 $ { for((i = 0; ++i <= p4_head;)); do p4 describe -s $i; done } > p4.log
 
 # Convert perforce log to gource format.
-$ ./p4-gource.py -p //depot/trunk -o trunk.gource p4.log
+$ ./p4-gource.py --path-filter //depot/trunk --out-file trunk.gource p4.log
 
 # Visualize.
 $ gource --highlight-all-users trunk.gource

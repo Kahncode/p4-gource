@@ -10,10 +10,10 @@ import os, sys, re, time, optparse
 usage = "usage: %s [options] FILE" % sys.argv[0]
 parser = optparse.OptionParser(usage=usage)
 parser.add_option("-o", "--out-file", dest="out", help="output filename, defaults to FILE.gource")
-parser.add_option("-p", "--path-filter", dest="filter", default="//", help="include only paths starting with FILTER")
+parser.add_option("-p", "--path-filter", dest="filter", default="//", help="include only paths starting with FILTER, default is %default")
 (options, args) = parser.parse_args()
 if 1 != len(args):
-    parser.error("one FILE argument required")
+    parser.error("one FILE argument is required")
 input = args[0]
 if not options.out:
     options.out = input + ".gource"
