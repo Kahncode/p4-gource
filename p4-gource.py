@@ -1,13 +1,5 @@
 #!  /usr/bin/python
 
-# p4-gource.py - perforce to gource change log converter
-# TODO: actually comment this file
-
-# TODO: save multiple files during log fetching so it can be done incrementally
-# TODO: add possibility of multiple paths and excludes by removing it from the regexp and testing paths in p4_to_gource
-
-#exclude : marketplace, plugins, engine, 
-
 import argparse
 import os
 import re
@@ -287,8 +279,8 @@ def run_gource(gource, gource_log_path, gource_args, output_video=None):
 
 	subprocess.run(base_cmd, check=True)
 
-#todo clean options or make that a parameter
-def run_gource2(gource_path, output_video=None):
+#keep this until a valid run with video generation
+def run_gource_ffmpeg(gource_path, output_video=None):
 	print(f"Running Gource")
 	base_cmd = [
 		"gource.cmd", gource_path, "-1280x720", "--camera-mode", "track",
