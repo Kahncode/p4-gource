@@ -30,21 +30,46 @@ def parse_args():
 
 	return parser.parse_args()
 
-def calculate_ranges(start_rev, end_rev, out_base):
-	existing_files = {int(m.groups()[0]): int(m.groups()[1]) for m in 
-					  (re.match(rf"{re.escape(out_base)}_(\d+)-(\d+).p4.log", f) for f in os.listdir("."))
-					  if m}
-	needed_ranges = []
-	current_rev = start_rev
+def calculate_ranges(start_rev, end_rev, batch_size, out_base):
+    # Extract existing revision ranges from log filenames
+    regex = re.compile(rf"{re.escape(out_base)}_(\d+)-(\d+).p4.log")
+    existing_ranges = []
 
-	while current_rev <= end_rev:
-		if current_rev in existing_files:
-			current_rev = existing_files[current_rev] + 1
-		else:
-			next_rev = min(current_rev + args.batch_size - 1, end_rev)
-			needed_ranges.append((current_rev, next_rev))
-			current_rev = next_rev + 1
-	return needed_ranges
+    # List all files and extract valid ranges
+    for filename in os.listdir("."):
+        match = regex.match(filename)
+        if match:
+            start, end = map(int, match.groups())
+            existing_ranges.append((start, end))
+
+    # Sort ranges and merge overlapping or contiguous ranges
+    existing_ranges.sort()
+    merged_ranges = []
+
+    for start, end in existing_ranges:
+        if merged_ranges and merged_ranges[-1][1] >= start - 1:
+            merged_ranges[-1] = (merged_ranges[-1][0], max(merged_ranges[-1][1], end))
+        else:
+            merged_ranges.append((start, end))
+
+    # Calculate the needed ranges based on the batch size
+    needed_ranges = []
+    current_rev = start_rev
+
+    for start, end in merged_ranges:
+        while current_rev < start:
+            next_batch_end = min(current_rev + batch_size - 1, start - 1, end_rev)
+            needed_ranges.append((current_rev, next_batch_end))
+            current_rev = next_batch_end + 1
+        current_rev = end + 1
+
+    # Check for any remaining revisions after the last merged range
+    while current_rev <= end_rev:
+        next_batch_end = min(current_rev + batch_size - 1, end_rev)
+        needed_ranges.append((current_rev, next_batch_end))
+        current_rev = next_batch_end + 1
+
+    return needed_ranges
 
 def fetch_p4_log(p4_server, p4_user, ranges, out_base):
 	for start, end in ranges:
@@ -92,7 +117,7 @@ if __name__ == "__main__":
 	args = parse_args()
 	if not args.skip_fetch:
 		if args.start_rev and args.end_rev: #TODO: if nothing specified, from 1 to the last one, needs to be determined though
-			ranges = calculate_ranges(args.start_rev, args.end_rev, args.output)
+			ranges = calculate_ranges(args.start_rev, args.end_rev, args.batch_size, args.output)
 			if ranges:
 				fetch_p4_log(args.p4_server, args.p4_user, ranges, args.output)
 	
