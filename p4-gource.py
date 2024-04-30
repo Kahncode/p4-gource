@@ -35,7 +35,7 @@ def parse_args():
 
 def get_latest_changelist():
 	# Run the p4 changes command to get the latest changelist
-	output = subprocess.check_output(["p4", "-ztag", "-u", "samuel", "-p", "ssl:perforce.darewise.com:1666", "changes", "-m", "1"]).decode("utf-8")
+	output = subprocess.check_output(["p4", "-ztag", "-u", "samuel", "-p", "ssl:perforce.darewise.com:1666", "changes", "-m", "1"]).decode(encoding='utf-8')
 
 	# Parse the output using regular expressions
 	changelist_match = re.search(r'change (\d+)', output)
@@ -77,7 +77,7 @@ def calculate_ranges(start_rev, end_rev, batch_size, out_base):
 			next_batch_end = min(current_rev + batch_size - 1, start - 1, end_rev)
 			needed_ranges.append((current_rev, next_batch_end))
 			current_rev = next_batch_end + 1
-		current_rev = end + 1
+		current_rev = max(start_rev, end + 1)
 
 	# Check for any remaining revisions after the last merged range
 	while current_rev <= end_rev:
@@ -94,7 +94,7 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base, include_paths, exclude_pa
 		final_log_filename = f"{out_base}_{start}-{end}.p4.log"
 
 		print(f"Fetching changelists from {start} to {end}")
-		with open(temp_log_filename, "w") as log_file:
+		with open(temp_log_filename, "w", encoding='utf-8') as log_file:
 			error_occurred = False  # Flag to track if any error occurred
 			for i in range(start, end + 1):
 				if (i - start) % 100 == 99: # Just to keep printing for heartbeat to the user
@@ -113,7 +113,12 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base, include_paths, exclude_pa
 					changelist_description = ""
 					changelist_contains_files = False
 					for lineb in cl.splitlines():
-						line = lineb.decode()  # Convert bytes to string
+						try:
+							line = lineb.decode('utf-8')
+						except UnicodeDecodeError:
+							# Try decoding with a different encoding
+							line = lineb.decode('latin-1')
+
 						if not line:
 							continue 
 
@@ -133,7 +138,7 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base, include_paths, exclude_pa
 						log_file.write(changelist_description)
 								
 				except Exception as e:
-						print(f"Error fetching changelist {i}: {e.output.decode()}")
+						print(f"Error fetching changelist {i}: {str(e)}")
 						error_occurred = True
 						break  # Exit the changelist loop on error
 
