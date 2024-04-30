@@ -21,6 +21,7 @@ def parse_args():
 	parser.add_argument("--fetch-only", action="store_true", default=False, help="Only fetch logs from P4, do not run Gource or video rendering")
 	parser.add_argument("--skip-fetch", action="store_true", default=False, help="Do not fetch, only run Gource and video rendering")
 	parser.add_argument("--skip-render", action="store_true", default=False, help="Open gource interactive, do not render video")
+	parser.add_argument("--interactive", action="store_true", default=False, help="Lets the user interact with Gource, do no close it automatically")
 	parser.add_argument("--gource-args", nargs=argparse.REMAINDER, help="Additional arguments to pass to Gource")
 	return parser.parse_args()
 
@@ -121,11 +122,13 @@ def filter_file(file, include_paths, exclude_paths):
 		filter_file.prev_exclude_paths = exclude_paths
 
 	# Check if file matches any include pattern
-	if not any(regex.match(file) for regex in filter_file.include_regexes):
-		return False
+	if filter_file.include_regexes:
+		if not any(regex.match(file) for regex in filter_file.include_regexes):
+			return False
 	# Check if file matches any exclude pattern
-	if any(regex.match(file) for regex in filter_file.exclude_regexes):
-		return False
+	if filter_file.exclude_regexes:
+		if any(regex.match(file) for regex in filter_file.exclude_regexes):
+			return False
 	return True
 
 # Compile regex patterns outside of the function to compile them only once
@@ -212,7 +215,7 @@ def concatenate_gource_logs(gource_files, final_gource_log):
 	with open(final_gource_log, 'w') as outfile:
 		for filename in gource_files:
 			with open(filename, 'r') as infile:
-				outfile.write(infile.read() + "\n")
+				outfile.write(infile.read())
 
 def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths):
 	target_gource_filename = f"{out_base}_{start_rev}-{end_rev}.gource"
@@ -238,60 +241,65 @@ def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths):
 	return target_gource_filename
 
 def find_gource_executable():
-    """ Attempt to run Gource commands and return the first successful one. """
-    commands = ["gource"]  # Default command for Unix-like systems
-    if platform.system() == "Windows":
-        # Add Windows-specific executables
-        commands.extend(["gource.cmd", "gource.exe"])
+	""" Attempt to run Gource commands and return the first successful one. """
+	commands = ["gource"]  # Default command for Unix-like systems
+	if platform.system() == "Windows":
+		# Add Windows-specific executables
+		commands.extend(["gource.cmd", "gource.exe"])
 
-    for command in commands:
-        try:
-            # Use subprocess.Popen to interact with Gource's interactive prompt
-            process = subprocess.Popen([command, "-help"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            # Send an "Enter" key press to proceed through the interactive prompt
-            process.communicate(input='\n')
-            # Wait for the process to complete
-            process.wait()
-            # Check if the process terminated successfully
-            if process.returncode == 0:
-                print(f"{command} is available and functional.")
-                return command
-            else:
-                print(f"{command} was found but failed to execute properly.")
-        except FileNotFoundError:
-            continue
+	for command in commands:
+		try:
+			# Use subprocess.Popen to interact with Gource's interactive prompt
+			process = subprocess.Popen([command, "-help"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+			# Send an "Enter" key press to proceed through the interactive prompt
+			process.communicate(input='\n')
+			# Wait for the process to complete
+			process.wait()
+			# Check if the process terminated successfully
+			if process.returncode == 0:
+				print(f"{command} is available and functional.")
+				return command
+			else:
+				print(f"{command} was found but failed to execute properly.")
+		except FileNotFoundError:
+			continue
 
-    raise EnvironmentError("No valid Gource executable found.")
+	raise EnvironmentError("No valid Gource executable found.")
 
-def run_gource(gource, gource_log_path, gource_args, output_video=None):
+def run_gource(gource, gource_log_path, gource_args, interactive, output_video, out_base):
 	print("Running Gource")
 	base_cmd = [
-		gource, gource_log_path, "-1280x720", "--camera-mode", "track",
-		"--disable-bloom", "--hide", "filenames", "-a", "1", "-s", "0.5",
-		"--user-filter", "buildbot", "--highlight-users", "--highlight-colour", "ffff00"
+		gource, gource_log_path, "--camera-mode", "track",
+		"--disable-bloom", "--hide", "filenames", "-a", "1", "-s", "0.5", "--highlight-users", "--highlight-colour", "ffff00"
 	]
 
 	if gource_args:
 		base_cmd.extend(gource_args)
 
 	if output_video:
-		base_cmd.extend(["-o", output_video])
 
-	subprocess.run(base_cmd, check=True)
+		if not interactive:
+			base_cmd.extend(["--stop-at-end"])
 
-#keep this until a valid run with video generation
-def run_gource_ffmpeg(gource_path, output_video=None):
-	print(f"Running Gource")
-	base_cmd = [
-		"gource.cmd", gource_path, "-1280x720", "--camera-mode", "track",
-		"--disable-bloom", "--hide", "filenames", "-a", "1", "-s", "0.5",
-		"--user-filter", "buildbot", "--highlight-users", "--highlight-colour", "ffff00"
-	]
-	if output_video:
-		video_cmd = " | ffmpeg -y -r 60 -f image2pipe -vcodec ppm -i - -vcodec libx264 -preset fast -pix_fmt yuv420p -crf 1 -threads 0 -bf 0 " + output_video
-		subprocess.run(' '.join(base_cmd) + video_cmd, shell=True)
+		output_filename = f"{out_base}.mp4"
+
+		base_cmd.extend(["-o", "-"])
+
+		ffmpeg_cmd = [
+			"ffmpeg", "-y", "-r", "60", "-f", "image2pipe", "-vcodec", "ppm", "-i", "-",
+			"-vcodec", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-crf", "1",
+			"-threads", "0", "-bf", "0", output_filename
+		]
+
+		print("Executing Gource:", ' '.join(base_cmd))
+		print("Executing FFmpeg:", ' '.join(ffmpeg_cmd))
+
+		gource_output = subprocess.Popen(base_cmd, stdout=subprocess.PIPE)
+		ffmpeg_process = subprocess.run(ffmpeg_cmd, stdin=gource_output.stdout)
+
 	else:
-		subprocess.run(base_cmd)
+		print("Executing Gource:", ' '.join(base_cmd))
+		subprocess.run(base_cmd, check=True)
 
 if __name__ == "__main__":
 	args = parse_args()
@@ -319,10 +327,6 @@ if __name__ == "__main__":
 	gource_log_path = generate_gource(args.start_rev, args.end_rev, args.output, args.include_path, args.exclude_path)
 
 	# render
-	run_gource(gource, gource_log_path, args.gource_args, not args.skip_render)
+	run_gource(gource, gource_log_path, args.gource_args, args.interactive, not args.skip_render, args.output)
 
 	print(f"Done")
-
-# TEST WITH NOTHING AS INPUT ! should take everything
-# path_include = ["//..."]
-# path_exclude = []

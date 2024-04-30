@@ -18,8 +18,11 @@
    - Clone or download the `p4-gource` script to your local machine.
 
 2. **Requirements**:
-   - Perforce command-line client (`p4`) should be installed and configured on your system.
-   - Gource should be installed and available in your system path.
+   - Perforce command-line client (`p4`) should be installed and configured on your system. (https://www.perforce.com/downloads/helix-visual-client-p4v)
+   - Gource should be installed and available in your system path. (https://gource.io/)
+   - ffmpeg should be installed and available in your system path. (https://ffmpeg.org/download.html)
+
+For windows, consider using Chocolatey (https://chocolatey.org/) to install gource and ffmpeg easily
 
 3. **Configuration**:
    - Update Perforce server details (`P4PORT`) and user credentials (`P4USER`) in the script arguments or environment variables.
