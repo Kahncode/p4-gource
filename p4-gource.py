@@ -15,7 +15,7 @@ def parse_args():
 	parser.add_argument("-i", "--include-path", action="append", default=[], help="Include paths for filtering (can specify multiple)")
 	parser.add_argument("-x", "--exclude-path", action="append", default=[], help="Exclude paths for filtering (can specify multiple)")
 	parser.add_argument("-o", "--output", type=str, default="p4-gource", help="Base name for output files")
-	parser.add_argument("-s", "--start-rev", type=int, default=0, help="Starting changelist number")
+	parser.add_argument("-s", "--start-rev", type=int, default=1, help="Starting changelist number")
 	parser.add_argument("-e", "--end-rev", type=int, default=None, help="Ending changelist number")
 	parser.add_argument("-b", "--batch-size", type=int, default=1000, help="Number of changelists per batch when fetching logs")
 	parser.add_argument("--fetch-only", action="store_true", default=False, help="Only fetch logs from P4, do not run Gource or video rendering")
@@ -120,7 +120,7 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base):
 		else:
 			# Remove the temp log file if there was an error and re-raise the exception
 			os.remove(temp_log_filename)
-			raise Exception(f"Error occurred during fetching, check logs for more details. Aborted fetching at changelist {i}.")
+			raise Exception(f"Error occurred during fetching, check logs for more details.")
 		
 	return fetched_files
 
@@ -332,7 +332,8 @@ if __name__ == "__main__":
 	gource = find_gource_executable()
 
 	if not args.skip_fetch:
-		if args.start_rev >= 0 and args.end_rev > args.start_rev:
+		if args.start_rev >= 1 and args.end_rev > args.start_rev:
+			print(f"Fetching revision range: {args.start_rev} to {args.end_rev}")
 			ranges = calculate_ranges(args.start_rev, args.end_rev, args.batch_size, args.output)
 			if ranges:
 				fetched_files = fetch_p4_log(args.p4_server, args.p4_user, ranges, args.output)
@@ -342,6 +343,8 @@ if __name__ == "__main__":
 					p4_to_gource(p4_log_path, gource_log_path, args.include_path, args.exclude_path)
 			else:
 				print(f"All revisions already fetched")
+		else: 
+			raise RuntimeError("Invalid revision range: {args.start_rev} to {args.end_rev}")
 	else:
 		print(f"Skipped fetching revisions")
 
