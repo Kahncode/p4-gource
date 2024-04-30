@@ -54,8 +54,9 @@ This script is licensed under the MIT License.
 ## Contributions
 Contributions are welcome! If you encounter any issues, have suggestions, or want to contribute enhancements, please feel free to open an issue or submit a pull request.
 
-## Acknowledgments
-Thanks to the original author, this was forked from https://github.com/max0x7ba/p4-gource.
-Thanks to Perforce for providing the Perforce version control system.
-Thanks to the Gource development team for creating the Gource visualization tool.
-Thanks to ChatGPT for providing most of the code faster than I could.
+## Acknowledgments  
+Thanks to the original author, this was forked from https://github.com/max0x7ba/p4-gource.  
+Thanks to Perforce for providing the Perforce version control system.  
+Thanks to the Gource development team for creating the Gource visualization tool.  
+Thanks to ChatGPT for providing most of the code faster than I could.  
+
