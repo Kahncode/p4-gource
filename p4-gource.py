@@ -1,5 +1,8 @@
 #!  /usr/bin/python
 
+# TODO: improvement ideas, use -ztag output for the log fetching, and immediately discard based on include/exclude list, this will help make the resulting files a lot smaller
+# which also means we would probably generate the gource file directly instead of doing it in two steps, but it requires changing all the parsing and converting
+
 import argparse
 import os
 import re
@@ -84,14 +87,14 @@ def calculate_ranges(start_rev, end_rev, batch_size, out_base):
 
 	return needed_ranges
 
-def fetch_p4_log(p4_server, p4_user, ranges, out_base):
+def fetch_p4_log(p4_server, p4_user, ranges, out_base, include_paths, exclude_paths):
 	fetched_files = []
 	for start, end in ranges:
 		temp_log_filename = f"{out_base}_{start}-{end}_temp.p4.log"
 		final_log_filename = f"{out_base}_{start}-{end}.p4.log"
 
 		print(f"Fetching changelists from {start} to {end}")
-		with open(temp_log_filename, "wb") as log_file:
+		with open(temp_log_filename, "w") as log_file:
 			error_occurred = False  # Flag to track if any error occurred
 			for i in range(start, end + 1):
 				if (i - start) % 100 == 99: # Just to keep printing for heartbeat to the user
@@ -106,9 +109,30 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base):
 					
 				try:
 					cl = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-					log_file.write(cl)
-				except subprocess.CalledProcessError as e:
-					if "no such changelist" not in e.output.decode():
+					# Check each line of the fetched log
+					changelist_description = ""
+					changelist_contains_files = False
+					for lineb in cl.splitlines():
+						line = lineb.decode()  # Convert bytes to string
+						if not line:
+							continue 
+
+						if "no such changelist" in line:
+							break # Skip this changelist, Perforce has many CL numbers not taken by actual changelists
+
+						file_match = p4_file.match(line)
+						if file_match:
+							file_path = file_match.group("file")
+							if filter_file(file_path, include_paths, exclude_paths):
+								changelist_description += line + '\n'
+								changelist_contains_files = True
+						else:
+							changelist_description += line + '\n'
+
+					if changelist_contains_files:
+						log_file.write(changelist_description)
+								
+				except Exception as e:
 						print(f"Error fetching changelist {i}: {e.output.decode()}")
 						error_occurred = True
 						break  # Exit the changelist loop on error
@@ -118,8 +142,8 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base):
 			os.rename(temp_log_filename, final_log_filename)
 			fetched_files.append(final_log_filename)
 		else:
-			# Remove the temp log file if there was an error and re-raise the exception
-			os.remove(temp_log_filename)
+			# Leave the temp file for potential diagnosis and recovery, as an error file
+			os.rename(temp_log_filename, "ERROR_" + final_log_filename)
 			raise Exception(f"Error occurred during fetching, check logs for more details.")
 		
 	return fetched_files
@@ -336,7 +360,7 @@ if __name__ == "__main__":
 			print(f"Fetching revision range: {args.start_rev} to {args.end_rev}")
 			ranges = calculate_ranges(args.start_rev, args.end_rev, args.batch_size, args.output)
 			if ranges:
-				fetched_files = fetch_p4_log(args.p4_server, args.p4_user, ranges, args.output)
+				fetched_files = fetch_p4_log(args.p4_server, args.p4_user, ranges, args.output, args.include_path, args.exclude_path)
 				# Convert fetched logs to Gource logs
 				for p4_log_path in fetched_files:
 					gource_log_path = p4_log_path.replace('.p4.log', '.gource')
