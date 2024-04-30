@@ -31,45 +31,45 @@ def parse_args():
 	return parser.parse_args()
 
 def calculate_ranges(start_rev, end_rev, batch_size, out_base):
-    # Extract existing revision ranges from log filenames
-    regex = re.compile(rf"{re.escape(out_base)}_(\d+)-(\d+).p4.log")
-    existing_ranges = []
+	# Extract existing revision ranges from log filenames
+	regex = re.compile(rf"{re.escape(out_base)}_(\d+)-(\d+).p4.log")
+	existing_ranges = []
 
-    # List all files and extract valid ranges
-    for filename in os.listdir("."):
-        match = regex.match(filename)
-        if match:
-            start, end = map(int, match.groups())
-            existing_ranges.append((start, end))
+	# List all files and extract valid ranges
+	for filename in os.listdir("."):
+		match = regex.match(filename)
+		if match:
+			start, end = map(int, match.groups())
+			existing_ranges.append((start, end))
 
-    # Sort ranges and merge overlapping or contiguous ranges
-    existing_ranges.sort()
-    merged_ranges = []
+	# Sort ranges and merge overlapping or contiguous ranges
+	existing_ranges.sort()
+	merged_ranges = []
 
-    for start, end in existing_ranges:
-        if merged_ranges and merged_ranges[-1][1] >= start - 1:
-            merged_ranges[-1] = (merged_ranges[-1][0], max(merged_ranges[-1][1], end))
-        else:
-            merged_ranges.append((start, end))
+	for start, end in existing_ranges:
+		if merged_ranges and merged_ranges[-1][1] >= start - 1:
+			merged_ranges[-1] = (merged_ranges[-1][0], max(merged_ranges[-1][1], end))
+		else:
+			merged_ranges.append((start, end))
 
-    # Calculate the needed ranges based on the batch size
-    needed_ranges = []
-    current_rev = start_rev
+	# Calculate the needed ranges based on the batch size
+	needed_ranges = []
+	current_rev = start_rev
 
-    for start, end in merged_ranges:
-        while current_rev < start:
-            next_batch_end = min(current_rev + batch_size - 1, start - 1, end_rev)
-            needed_ranges.append((current_rev, next_batch_end))
-            current_rev = next_batch_end + 1
-        current_rev = end + 1
+	for start, end in merged_ranges:
+		while current_rev < start and start < end_rev:
+			next_batch_end = min(current_rev + batch_size - 1, start - 1, end_rev)
+			needed_ranges.append((current_rev, next_batch_end))
+			current_rev = next_batch_end + 1
+		current_rev = end + 1
 
-    # Check for any remaining revisions after the last merged range
-    while current_rev <= end_rev:
-        next_batch_end = min(current_rev + batch_size - 1, end_rev)
-        needed_ranges.append((current_rev, next_batch_end))
-        current_rev = next_batch_end + 1
+	# Check for any remaining revisions after the last merged range
+	while current_rev <= end_rev:
+		next_batch_end = min(current_rev + batch_size - 1, end_rev)
+		needed_ranges.append((current_rev, next_batch_end))
+		current_rev = next_batch_end + 1
 
-    return needed_ranges
+	return needed_ranges
 
 def fetch_p4_log(p4_server, p4_user, ranges, out_base):
 	for start, end in ranges:
@@ -80,7 +80,7 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base):
 		with open(temp_log_filename, "wb") as log_file:
 			error_occurred = False  # Flag to track if any error occurred
 			for i in range(start, end + 1):
-				if i % 100 == 0:
+				if (i - start) % 100 == 99: # Just to keep printing for heartbeat to the user
 					print(f"Fetching changelist {i}")
 				cmd = ["p4", "-p", p4_server, "-u", p4_user, "describe", "-s", str(i)]
 				try:
