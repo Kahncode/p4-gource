@@ -10,20 +10,38 @@ import platform
 
 def parse_args():
 	parser = argparse.ArgumentParser(description="Extract Perforce data to generate a visualization using Gource. Requires Gource (https://gource.io/).")
-	parser.add_argument("-u", "--p4-user", type=str, required=True, help="Perforce username")
-	parser.add_argument("-p", "--p4-server", type=str, required=True, help="Perforce server address")
+	parser.add_argument("-u", "--p4-user", type=str, help="Perforce username")
+	parser.add_argument("-p", "--p4-server", type=str, help="Perforce server address")
 	parser.add_argument("-i", "--include-path", action="append", default=[], help="Include paths for filtering (can specify multiple)")
 	parser.add_argument("-x", "--exclude-path", action="append", default=[], help="Exclude paths for filtering (can specify multiple)")
 	parser.add_argument("-o", "--output", type=str, default="p4-gource", help="Base name for output files")
 	parser.add_argument("-s", "--start-rev", type=int, default=0, help="Starting changelist number")
 	parser.add_argument("-e", "--end-rev", type=int, default=None, help="Ending changelist number")
-	parser.add_argument("-b", "--batch-size", type=int, default=10000, help="Number of changelists per batch when fetching logs")
+	parser.add_argument("-b", "--batch-size", type=int, default=1000, help="Number of changelists per batch when fetching logs")
 	parser.add_argument("--fetch-only", action="store_true", default=False, help="Only fetch logs from P4, do not run Gource or video rendering")
 	parser.add_argument("--skip-fetch", action="store_true", default=False, help="Do not fetch, only run Gource and video rendering")
 	parser.add_argument("--skip-render", action="store_true", default=False, help="Open gource interactive, do not render video")
 	parser.add_argument("--interactive", action="store_true", default=False, help="Lets the user interact with Gource, do no close it automatically")
 	parser.add_argument("--gource-args", nargs=argparse.REMAINDER, help="Additional arguments to pass to Gource")
-	return parser.parse_args()
+
+	args = parser.parse_args()
+	if not args.end_rev:
+		args.end_rev = get_latest_changelist()
+
+	return args
+
+def get_latest_changelist():
+	# Run the p4 changes command to get the latest changelist
+	output = subprocess.check_output(["p4", "-ztag", "-u", "samuel", "-p", "ssl:perforce.darewise.com:1666", "changes", "-m", "1"]).decode("utf-8")
+
+	# Parse the output using regular expressions
+	changelist_match = re.search(r'change (\d+)', output)
+
+	if changelist_match:
+		changelist_number = int(changelist_match.group(1))
+		return changelist_number
+	else:
+		raise RuntimeError("Failed to parse latest changelist number")
 
 def calculate_ranges(start_rev, end_rev, batch_size, out_base):
 	# Extract existing revision ranges from log filenames
@@ -78,7 +96,14 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base):
 			for i in range(start, end + 1):
 				if (i - start) % 100 == 99: # Just to keep printing for heartbeat to the user
 					print(f"Fetching changelist {i}")
-				cmd = ["p4", "-p", p4_server, "-u", p4_user, "describe", "-s", str(i)]
+
+				cmd = ["p4"]
+				if p4_server is not None:
+					cmd.extend(["-p", p4_server])
+				if p4_user is not None:
+					cmd.extend(["-u", p4_user])
+				cmd.extend(["describe", "-s", str(i)])
+					
 				try:
 					cl = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
 					log_file.write(cl)
@@ -307,7 +332,7 @@ if __name__ == "__main__":
 	gource = find_gource_executable()
 
 	if not args.skip_fetch:
-		if args.start_rev and args.end_rev: #TODO: if nothing specified, from 1 to the last one, needs to be determined though
+		if args.start_rev >= 0 and args.end_rev > args.start_rev:
 			ranges = calculate_ranges(args.start_rev, args.end_rev, args.batch_size, args.output)
 			if ranges:
 				fetched_files = fetch_p4_log(args.p4_server, args.p4_user, ranges, args.output)
