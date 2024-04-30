@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 def parse_args():
 	parser = argparse.ArgumentParser(description="Convert Perforce logs to Gource format.")
@@ -105,34 +106,34 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base):
 	return fetched_files
 
 def compile_path_patterns(paths):
-    """ Compile Perforce-style path patterns into regular expressions. """
-    regex_patterns = []
-    for path in paths:
-        # Replace Perforce wildcard '...' with regex '.*'
-        pattern = path.replace('...', '.*')
-        # Ensure the pattern matches from the start of the string
-        pattern = '^' + re.escape(pattern).replace(r'\.\*', '.*')
-        # Compile the pattern for faster matching
-        regex_patterns.append(re.compile(pattern))
-    return regex_patterns
+	""" Compile Perforce-style path patterns into regular expressions. """
+	regex_patterns = []
+	for path in paths:
+		# Replace Perforce wildcard '...' with regex '.*'
+		pattern = path.replace('...', '.*')
+		# Ensure the pattern matches from the start of the string
+		pattern = '^' + re.escape(pattern).replace(r'\.\*', '.*')
+		# Compile the pattern for faster matching
+		regex_patterns.append(re.compile(pattern))
+	return regex_patterns
 
 def filter_file(file, include_paths, exclude_paths):
-    """ Filter files based on compiled include and exclude regex patterns. """
-    # Compile include and exclude patterns on first use or when paths are updated
-    if not hasattr(filter_file, 'include_regexes') or filter_file.prev_include_paths != include_paths:
-        filter_file.include_regexes = compile_path_patterns(include_paths)
-        filter_file.prev_include_paths = include_paths
-    if not hasattr(filter_file, 'exclude_regexes') or filter_file.prev_exclude_paths != exclude_paths:
-        filter_file.exclude_regexes = compile_path_patterns(exclude_paths)
-        filter_file.prev_exclude_paths = exclude_paths
+	""" Filter files based on compiled include and exclude regex patterns. """
+	# Compile include and exclude patterns on first use or when paths are updated
+	if not hasattr(filter_file, 'include_regexes') or filter_file.prev_include_paths != include_paths:
+		filter_file.include_regexes = compile_path_patterns(include_paths)
+		filter_file.prev_include_paths = include_paths
+	if not hasattr(filter_file, 'exclude_regexes') or filter_file.prev_exclude_paths != exclude_paths:
+		filter_file.exclude_regexes = compile_path_patterns(exclude_paths)
+		filter_file.prev_exclude_paths = exclude_paths
 
-    # Check if file matches any include pattern
-    if not any(regex.match(file) for regex in filter_file.include_regexes):
-        return False
-    # Check if file matches any exclude pattern
-    if any(regex.match(file) for regex in filter_file.exclude_regexes):
-        return False
-    return True
+	# Check if file matches any include pattern
+	if not any(regex.match(file) for regex in filter_file.include_regexes):
+		return False
+	# Check if file matches any exclude pattern
+	if any(regex.match(file) for regex in filter_file.exclude_regexes):
+		return False
+	return True
 
 # Compile regex patterns outside of the function to compile them only once
 p4_entry = re.compile(r"^Change \d+ by (?P<author>\w+)@\S+ on (?P<timestamp>\S+ \S+)\s*(?P<pending>\*pending\*)?\s*$")
@@ -149,6 +150,10 @@ p4_action_to_gource = {
 }
 
 def p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths):
+	if os.path.exists(gource_log_path):
+		print(f"Using existing file {gource_log_path}")
+		return
+
 	""" Convert Perforce log to a Gource-compatible log format. """
 	print(f"Converting P4 to gource format: {p4_log_path} -> {gource_log_path}")
 	with open(p4_log_path, 'r') as p4_log, open(gource_log_path, 'w') as gource_log:
@@ -179,6 +184,65 @@ def p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths):
 					formatted_entry = f"{timestamp}|{author}|{action_code}|{file.group('file')}\n"
 					gource_log.write(formatted_entry)
 
+def discover_p4_logs(out_base):
+	""" Scan the directory for all Perforce log files and return their revision ranges. """
+	p4_logs = {}
+	log_pattern = re.compile(rf"{re.escape(out_base)}_(\d+)-(\d+).p4.log$")
+	for filename in os.listdir('.'):
+		match = log_pattern.match(filename)
+		if match:
+			start, end = int(match.group(1)), int(match.group(2))
+			p4_logs[(start, end)] = filename
+	return p4_logs
+
+def select_logs_for_range(p4_logs, start_rev, end_rev):
+	""" Select log files to cover the range as continuously as possible. """
+	selected_files = {}
+	required_start = start_rev
+
+	# Sort logs by start revision
+	sorted_logs = sorted(p4_logs.items(), key=lambda x: x[0][0])
+
+	for (start, end), filename in sorted_logs:
+		if start > required_start and selected_files:
+			break
+		if end >= required_start:
+			selected_files[(start, end)] = filename
+			required_start = end + 1
+			if required_start > end_rev:
+				break
+
+	return selected_files
+
+def concatenate_gource_logs(gource_files, final_gource_log):
+	""" Concatenate Gource files into one final log. """
+	with open(final_gource_log, 'w') as outfile:
+		for filename in gource_files:
+			with open(filename, 'r') as infile:
+				outfile.write(infile.read() + "\n")
+
+def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths):
+	target_gource_filename = f"{out_base}_{start_rev}-{end_rev}.gource"
+	
+	if os.path.exists(target_gource_filename):
+		print(f"Warning: Using existing file {target_gource_filename}")
+
+	# Build with what we have, result may be larger than desired range on purpose
+	p4_logs = discover_p4_logs(out_base)
+	selected_logs = select_logs_for_range(p4_logs, start_rev, end_rev)
+	gource_files = []
+	for key, p4_log_path in selected_logs.items():
+		gource_log_path = p4_log_path.replace('.p4.log', '.gource')
+		p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths)
+		gource_files.append(gource_log_path)
+
+	actual_range = list(selected_logs.keys())
+	final_log_path = f"{out_base}_{actual_range[0][0]}-{actual_range[-1][1]}.gource"
+	concatenate_gource_logs(gource_files, final_log_path)
+	print(f"Gource file created at {final_log_path}")
+	print(f"Actual revision range covered: {actual_range[0][0]} to {actual_range[-1][1]}")
+
+
 # TODO: this needs to run on the gource files trimmed by rev range, so first we need to build the gource file containing the rev range we need
 def run_gource(log_pattern, output_video=None):
 	base_cmd = [
@@ -202,15 +266,20 @@ if __name__ == "__main__":
 				# Convert fetched logs to Gource logs
 				for p4_log_path in fetched_files:
 					gource_log_path = p4_log_path.replace('.p4.log', '.gource')
-					p4_to_gource(p4_log_path, gource_log_path, include_path, exclude_path)
+					p4_to_gource(p4_log_path, gource_log_path, args.include_path, args.exclude_path)
 			else:
 				print(f"All revisions already fetched")
 	else:
 		print(f"Skipped fetching revisions")
 
-	if not args.fetch_only:
-		log_files = f"{args.output}_*.p4.log"
-		run_gource(log_files, not args.skip-render)
+	if args.fetch_only:
+		sys.exit(0)
+
+	generate_gource(args.start_rev, args.end_rev, args.output, args.include_path, args.exclude_path)
+
+	# render
+	log_files = f"{args.output}_*.p4.log"
+	run_gource(log_files, not args.skip-render)
 		   
 
 
@@ -233,66 +302,6 @@ if __name__ == "__main__":
 
 # path_include = ["//..."]
 # path_exclude = []
-
-p4_entry = re.compile("^Change \d+ by (?P<author>\w+)@\S+ on (?P<timestamp>\S+ \S+)\s*(?P<pending>\*pending\*)?\s*$")
-p4_affected_files = re.compile("^Affected files ...\s*$")
-p4_file = re.compile("^... (?P<file>//[^#]+)#\d+ (?P<action>\w+)\s*$")
-
-p4_action_to_gource = {
-	"add" : "A"
-	, "edit" : "M"
-	, "integrate" : "M"
-	, "branch" : "A"
-	, "delete" : "D"
-	, "purge" : "D"
-}
-
-def filter_file(file):
-	match = False
-	for include in path_include:
-		if file.startswith(include):
-			match = True
-			break
-
-	if not match:
-		return False
-
-	for exclude in path_exclude:
-		if file.startswith(exclude):
-			return False
-
-	return True
-
-
-def p4_to_gource(p4_log, gource_log):
-	author = None
-	timestamp = None
-	files = False
-	ignore_entry = False
-	line_count = 0
-	for line in p4_log:
-		line_count+=1
-		if line_count % 100000 == 0:
-			print("Now parsing line %s" % line_count)
-
-		entry = p4_entry.match(line)
-		if entry:
-			#skip pending entries as they have not been submitted
-			ignore_entry = entry.group("pending") is not None
-			author = entry.group("author").lower()
-			timestamp = int(time.mktime(time.strptime(entry.group("timestamp"), "%Y/%m/%d %H:%M:%S")))
-			files = False
-			continue
-		if not files:
-			if p4_affected_files.match(line):
-				files = True
-		elif not ignore_entry:
-			file = p4_file.match(line)
-			if file and filter_file(file.group("file")):
-				print("%d|%s|%s|%s|" % (timestamp
-					, author
-					, p4_action_to_gource[file.group("action")]
-					, file.group("file")), file=gource_log)
 
 # def fetch_p4_log(p4_log_file):
 # 	output = subprocess.check_output("p4 changes -m 1").decode("utf-8")
