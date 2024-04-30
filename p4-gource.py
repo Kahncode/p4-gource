@@ -14,9 +14,10 @@ import re
 import subprocess
 import sys
 import time
+import platform
 
 def parse_args():
-	parser = argparse.ArgumentParser(description="Convert Perforce logs to Gource format.")
+	parser = argparse.ArgumentParser(description="Extract Perforce data to generate a visualization using Gource. Requires Gource (https://gource.io/).")
 	parser.add_argument("-u", "--p4-user", type=str, required=True, help="Perforce username")
 	parser.add_argument("-p", "--p4-server", type=str, required=True, help="Perforce server address")
 	parser.add_argument("-i", "--include-path", action="append", default=[], help="Include paths for filtering (can specify multiple)")
@@ -28,7 +29,7 @@ def parse_args():
 	parser.add_argument("--fetch-only", action="store_true", default=False, help="Only fetch logs from P4, do not run Gource or video rendering")
 	parser.add_argument("--skip-fetch", action="store_true", default=False, help="Do not fetch, only run Gource and video rendering")
 	parser.add_argument("--skip-render", action="store_true", default=False, help="Open gource interactive, do not render video")
-
+	parser.add_argument("--gource-args", nargs=argparse.REMAINDER, help="Additional arguments to pass to Gource")
 	return parser.parse_args()
 
 def calculate_ranges(start_rev, end_rev, batch_size, out_base):
@@ -226,6 +227,7 @@ def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths):
 	
 	if os.path.exists(target_gource_filename):
 		print(f"Warning: Using existing file {target_gource_filename}")
+		return target_gource_filename
 
 	# Build with what we have, result may be larger than desired range on purpose
 	p4_logs = discover_p4_logs(out_base)
@@ -237,16 +239,59 @@ def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths):
 		gource_files.append(gource_log_path)
 
 	actual_range = list(selected_logs.keys())
-	final_log_path = f"{out_base}_{actual_range[0][0]}-{actual_range[-1][1]}.gource"
-	concatenate_gource_logs(gource_files, final_log_path)
-	print(f"Gource file created at {final_log_path}")
+	target_gource_filename = f"{out_base}_{actual_range[0][0]}-{actual_range[-1][1]}.gource"
+	concatenate_gource_logs(gource_files, target_gource_filename)
+	print(f"Gource file created at {target_gource_filename}")
 	print(f"Actual revision range covered: {actual_range[0][0]} to {actual_range[-1][1]}")
+	return target_gource_filename
 
+def find_gource_executable():
+    """ Attempt to run Gource commands and return the first successful one. """
+    commands = ["gource"]  # Default command for Unix-like systems
+    if platform.system() == "Windows":
+        # Add Windows-specific executables
+        commands.extend(["gource.cmd", "gource.exe"])
 
-# TODO: this needs to run on the gource files trimmed by rev range, so first we need to build the gource file containing the rev range we need
-def run_gource(log_pattern, output_video=None):
+    for command in commands:
+        try:
+            # Use subprocess.Popen to interact with Gource's interactive prompt
+            process = subprocess.Popen([command, "-help"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Send an "Enter" key press to proceed through the interactive prompt
+            process.communicate(input='\n')
+            # Wait for the process to complete
+            process.wait()
+            # Check if the process terminated successfully
+            if process.returncode == 0:
+                print(f"{command} is available and functional.")
+                return command
+            else:
+                print(f"{command} was found but failed to execute properly.")
+        except FileNotFoundError:
+            continue
+
+    raise EnvironmentError("No valid Gource executable found.")
+
+def run_gource(gource, gource_log_path, gource_args, output_video=None):
+	print("Running Gource")
 	base_cmd = [
-		"gource", log_pattern, "-1280x720", "--camera-mode", "track",
+		gource, gource_log_path, "-1280x720", "--camera-mode", "track",
+		"--disable-bloom", "--hide", "filenames", "-a", "1", "-s", "0.5",
+		"--user-filter", "buildbot", "--highlight-users", "--highlight-colour", "ffff00"
+	]
+
+	if gource_args:
+		base_cmd.extend(gource_args)
+
+	if output_video:
+		base_cmd.extend(["-o", output_video])
+
+	subprocess.run(base_cmd, check=True)
+
+#todo clean options or make that a parameter
+def run_gource2(gource_path, output_video=None):
+	print(f"Running Gource")
+	base_cmd = [
+		"gource.cmd", gource_path, "-1280x720", "--camera-mode", "track",
 		"--disable-bloom", "--hide", "filenames", "-a", "1", "-s", "0.5",
 		"--user-filter", "buildbot", "--highlight-users", "--highlight-colour", "ffff00"
 	]
@@ -258,6 +303,9 @@ def run_gource(log_pattern, output_video=None):
 
 if __name__ == "__main__":
 	args = parse_args()
+
+	gource = find_gource_executable()
+
 	if not args.skip_fetch:
 		if args.start_rev and args.end_rev: #TODO: if nothing specified, from 1 to the last one, needs to be determined though
 			ranges = calculate_ranges(args.start_rev, args.end_rev, args.batch_size, args.output)
@@ -275,65 +323,14 @@ if __name__ == "__main__":
 	if args.fetch_only:
 		sys.exit(0)
 
-	generate_gource(args.start_rev, args.end_rev, args.output, args.include_path, args.exclude_path)
+	#generate_gource_log
+	gource_log_path = generate_gource(args.start_rev, args.end_rev, args.output, args.include_path, args.exclude_path)
 
 	# render
-	log_files = f"{args.output}_*.p4.log"
-	run_gource(log_files, not args.skip-render)
-		   
+	run_gource(gource, gource_log_path, args.gource_args, not args.skip_render)
 
+	print(f"Done")
 
-# usage = "usage: %s [options] [FILE]" % sys.argv[0]
-# parser = optparse.OptionParser(usage=usage)
-# #old options
-# parser.add_option("-o", "--out-file", dest="out", help="output filename, defaults to corvus")
-# #parser.add_option("-p", "--path-filter", dest="filter", default="//", help="include only paths starting with FILTER")
-# (options, args) = parser.parse_args()
-
-# if options.out:
-# 	output = options.out
-# else:
-# 	output = "p4-gource"
-
-# p4_log = "%s.p4.log" % output
-# gource_log = "%s.gource" % output
-# gource_log = "%s.gource" % output
-
-
+# TEST WITH NOTHING AS INPUT ! should take everything
 # path_include = ["//..."]
 # path_exclude = []
-
-# def fetch_p4_log(p4_log_file):
-# 	output = subprocess.check_output("p4 changes -m 1").decode("utf-8")
-# 	last_change = re.search(r'Change (\d+) .*', output).group(1)
-# 	print("Fetching %s changelists" % last_change)
-# 	with open(input, "wb") as w:
-# 		for i in range(1, int(last_change)):
-# 			cl = subprocess.check_output(["p4", "describe", "-s", str(i)])
-# 			w.write(cl)
-# 			if i % 100 == 0:
-# 				print("Now fetching changelist %s" % i)
-
-# #main logic
-# print("Fatching p4 log")
-# if not os.path.exists(p4_log):
-# 	fetch_p4_log(p4_log)
-
-# print("Converting log to gource")
-# p4_to_gource(open(p4_log, "r", encoding="ISO-8859-1"), open(gource_log, "w"))
-
-# print("Calling gource")
-# #https://github.com/acaudwell/Gource/wiki/Videos
-# subprocess.call(["gource-0.47.win64\gource.exe",
-# 				 "-1280x720",
-# 				 "--camera-mode", "track",
-# 				 "--disable-bloom",
-# 				 "--hide", "filenames",
-# 				 "-a", "1",
-# 				 "-s", "0.5",
-# 				 "--user-filter", "buildbot",
-# 				 "--highlight-users",
-# 				 "--highlight-colour", "ffff00",
-# 				 #"-o", "%s.ppm" % output, # for video output
-# 				 gource_log])
-
