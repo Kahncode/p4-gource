@@ -11,6 +11,7 @@
 - **Automatic Gource Detection**: Automatically detects the presence of Gource executable and ensures its availability before execution.
 - **Custom Gource Arguments**: Allows users to specify custom arguments for the Gource command for visualization customization.
 - **Init View**: Automatically populates the gource view with the list of files present in the repository at the start revision.
+- **Path Reduction**: Allows users to specify regular expressions in order to reduce paths and obtain a nicer visualization.
 
 ## Usage
 
