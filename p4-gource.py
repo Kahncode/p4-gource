@@ -3,6 +3,8 @@
 # TODO: improvement ideas, use -ztag output for the log fetching, and immediately discard based on include/exclude list, this will help make the resulting files a lot smaller
 # which also means we would probably generate the gource file directly instead of doing it in two steps, but it requires changing all the parsing and converting
 
+# TODO: add function to reduce node, for instance we're going to reduce a path to another by regexp match and replace, that can be fed as parameters to the script, reduction happens during conversion to gource log
+
 import argparse
 import os
 import re
@@ -35,7 +37,7 @@ def parse_args():
 
 def get_latest_changelist():
 	# Run the p4 changes command to get the latest changelist
-	output = subprocess.check_output(["p4", "-ztag", "-u", "samuel", "-p", "ssl:perforce.darewise.com:1666", "changes", "-m", "1"]).decode(encoding='utf-8')
+	output = subprocess.check_output(["p4", "-ztag", "changes", "-m", "1"]).decode(encoding='utf-8')
 
 	# Parse the output using regular expressions
 	changelist_match = re.search(r'change (\d+)', output)
