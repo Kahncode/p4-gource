@@ -25,6 +25,7 @@ def parse_args():
 	parser.add_argument("-b", "--batch-size", type=int, default=1000, help="Number of changelists per batch when fetching logs")
 	parser.add_argument("--fetch-only", action="store_true", default=False, help="Only fetch logs from P4, do not run Gource or video rendering")
 	parser.add_argument("--skip-fetch", action="store_true", default=False, help="Do not fetch, only run Gource and video rendering")
+	parser.add_argument("--skip-init", action="store_true", default=False, help="Do not add the list of files present in the repository, only visualize changes in the revision range")
 	parser.add_argument("--skip-render", action="store_true", default=False, help="Open gource interactive, do not render video")
 	parser.add_argument("--interactive", action="store_true", default=False, help="Lets the user interact with Gource, do no close it automatically")
 	parser.add_argument("--gource-args", nargs=argparse.REMAINDER, help="Additional arguments to pass to Gource")
@@ -33,11 +34,26 @@ def parse_args():
 	if not args.end_rev:
 		args.end_rev = get_latest_changelist()
 
+	global p4_server
+	p4_server = args.p4_server
+	global p4_user
+	p4_user = args.p4_user
+
 	return args
+
+def p4_cmd(args):
+	cmd = ["p4"]
+	if p4_server is not None:
+		cmd.extend(["-p", p4_server])
+	if p4_user is not None:
+		cmd.extend(["-u", p4_user])
+	if args is not None:
+		cmd.extend(args)
+	return cmd
 
 def get_latest_changelist():
 	# Run the p4 changes command to get the latest changelist
-	output = subprocess.check_output(["p4", "-ztag", "changes", "-m", "1"]).decode(encoding='utf-8')
+	output = subprocess.check_output(p4_cmd(["-ztag", "changes", "-m", "1"]), stderr=subprocess.STDOUT, text=True)
 
 	# Parse the output using regular expressions
 	changelist_match = re.search(r'change (\d+)', output)
@@ -89,7 +105,7 @@ def calculate_ranges(start_rev, end_rev, batch_size, out_base):
 
 	return needed_ranges
 
-def fetch_p4_log(p4_server, p4_user, ranges, out_base, include_paths, exclude_paths):
+def fetch_p4_log(ranges, out_base, include_paths, exclude_paths):
 	fetched_files = []
 	for start, end in ranges:
 		temp_log_filename = f"{out_base}_{start}-{end}_temp.p4.log"
@@ -102,12 +118,7 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base, include_paths, exclude_pa
 				if (i - start) % 100 == 99: # Just to keep printing for heartbeat to the user
 					print(f"Fetching changelist {i}")
 
-				cmd = ["p4"]
-				if p4_server is not None:
-					cmd.extend(["-p", p4_server])
-				if p4_user is not None:
-					cmd.extend(["-u", p4_user])
-				cmd.extend(["describe", "-s", str(i)])
+				cmd = p4_cmd(["describe", "-s", str(i)])
 					
 				try:
 					cl = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
@@ -154,6 +165,53 @@ def fetch_p4_log(p4_server, p4_user, ranges, out_base, include_paths, exclude_pa
 			raise Exception(f"Error occurred during fetching, check logs for more details.")
 		
 	return fetched_files
+
+def format_perforce_search_path(path):
+	# Format the given path for Perforce, adding ... wildcard if necessary
+	if path.endswith("..."):
+		return path
+	elif path.endswith("/"):
+		return path + "..."
+	else:
+		return path + "/..."
+
+def fetch_p4_init(first_revision, out_base, include_paths, exclude_paths):
+	output_filename = f"{out_base}_init_{first_revision}.gource"
+	
+	if os.path.exists(output_filename):
+		print(f"Warning: Using existing file {output_filename}")
+		return output_filename
+	
+	# Format include filters for Perforce
+	search_paths = [format_perforce_search_path(path) for path in include_paths]
+
+	# Generate the Gource log file with fake initial revisions
+	with open(output_filename, "w") as f:
+		for path in search_paths:
+			cmd = p4_cmd(["files", "-e", f"{path}@{first_revision}"])
+			try:
+				output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
+				if "no such file(s)" in output:
+					continue
+
+				for line in output.splitlines():
+					match = re.match(r"^(.+?)#(\d+) - (\w+) change (\d+)", line)
+					if match:
+						file, rev, action, changelist = match.groups()
+						if filter_file(file, include_paths, exclude_paths):
+							action_code = p4_action_to_gource.get(action, "M")
+							formatted_entry = f"0|init|{action_code}|{file}\n"
+							f.write(formatted_entry)
+			except subprocess.CalledProcessError as e:
+				print(f"Error running p4 files command for path {path}: {e}")
+				print(f"Exception details: {repr(e)}")
+				# Remove the partially written file if it exists
+				if os.path.exists(output_filename):
+					os.remove(output_filename)
+				return None  # Or handle the error in another way
+	
+	print(f"Generated initial revisions file: {output_filename}")
+	return output_filename
 
 def compile_path_patterns(paths):
 	""" Compile Perforce-style path patterns into regular expressions. """
@@ -232,7 +290,7 @@ def p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths):
 			if files:
 				file = p4_file.match(line)
 				if file and filter_file(file.group("file"), include_paths, exclude_paths):
-					action_code = p4_action_to_gource.get(file.group("action"), "")
+					action_code = p4_action_to_gource.get(file.group("action"), "M")
 					formatted_entry = f"{timestamp}|{author}|{action_code}|{file.group('file')}\n"
 					gource_log.write(formatted_entry)
 
@@ -273,7 +331,7 @@ def concatenate_gource_logs(gource_files, final_gource_log):
 			with open(filename, 'r') as infile:
 				outfile.write(infile.read())
 
-def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths):
+def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths, skip_init):
 	target_gource_filename = f"{out_base}_{start_rev}-{end_rev}.gource"
 	
 	if os.path.exists(target_gource_filename):
@@ -290,6 +348,12 @@ def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths):
 		gource_files.append(gource_log_path)
 
 	actual_range = list(selected_logs.keys())
+
+	if not skip_init:
+		#fetch or create "init" gource file, which contains a view of all the files present in the repository at the first revision
+		first_revision = actual_range[0][0]
+		gource_files.insert(0, fetch_p4_init(first_revision, out_base, include_paths, exclude_paths))
+
 	target_gource_filename = f"{out_base}_{actual_range[0][0]}-{actual_range[-1][1]}.gource"
 	concatenate_gource_logs(gource_files, target_gource_filename)
 	print(f"Gource file created at {target_gource_filename}")
@@ -367,7 +431,7 @@ if __name__ == "__main__":
 			print(f"Fetching revision range: {args.start_rev} to {args.end_rev}")
 			ranges = calculate_ranges(args.start_rev, args.end_rev, args.batch_size, args.output)
 			if ranges:
-				fetched_files = fetch_p4_log(args.p4_server, args.p4_user, ranges, args.output, args.include_path, args.exclude_path)
+				fetched_files = fetch_p4_log(ranges, args.output, args.include_path, args.exclude_path)
 				# Convert fetched logs to Gource logs
 				for p4_log_path in fetched_files:
 					gource_log_path = p4_log_path.replace('.p4.log', '.gource')
@@ -383,7 +447,7 @@ if __name__ == "__main__":
 		sys.exit(0)
 
 	#generate_gource_log
-	gource_log_path = generate_gource(args.start_rev, args.end_rev, args.output, args.include_path, args.exclude_path)
+	gource_log_path = generate_gource(args.start_rev, args.end_rev, args.output, args.include_path, args.exclude_path, args.skip_init)
 
 	# render
 	run_gource(gource, gource_log_path, args.gource_args, args.interactive, not args.skip_render, args.output)

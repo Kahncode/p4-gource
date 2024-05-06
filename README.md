@@ -10,6 +10,7 @@
 - **Gource File Generation**: Converts fetched Perforce logs into Gource-compatible format for visualization.
 - **Automatic Gource Detection**: Automatically detects the presence of Gource executable and ensures its availability before execution.
 - **Custom Gource Arguments**: Allows users to specify custom arguments for the Gource command for visualization customization.
+- **Init View**: Automatically populates the gource view with the list of files present in the repository at the start revision.
 
 ## Usage
 
