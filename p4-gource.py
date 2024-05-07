@@ -416,18 +416,15 @@ def find_gource_executable():
 
 def run_gource(gource, gource_log_path, gource_args, interactive, output_video, out_base):
 	print("Running Gource")
-	base_cmd = [
-		gource, gource_log_path, "--camera-mode", "track",
-		"--disable-bloom", "--hide", "filenames", "-a", "1", "-s", "0.5", "--highlight-users", "--highlight-colour", "ffff00"
-	]
-
+	base_cmd = [gource, gource_log_path]
+	
 	if gource_args:
 		base_cmd.extend(gource_args)
 
 	if output_video:
 
 		if not interactive:
-			base_cmd.extend(["--stop-at-end"])
+			base_cmd.extend(["--stop-at-end", "--disable-input"])
 
 		output_filename = f"{out_base}.mp4"
 
