@@ -234,7 +234,7 @@ def reduce_path(path, regex_matches, regex_replaces):
 	return reduced_path
 
 # Compile regex patterns outside of the function to compile them only once
-p4_entry = re.compile(r"^Change \d+ by (?P<author>\w+)@\S+ on (?P<timestamp>\S+ \S+)\s*(?P<pending>\*pending\*)?\s*$")
+p4_entry = re.compile(r"^Change \d+ by (?P<author>\S+)@\S+ on (?P<timestamp>\S+ \S+)\s*(?P<pending>\*pending\*)?\s*$")
 p4_affected_files = re.compile(r"^Affected files ...\s*$")
 p4_file = re.compile(r"^... (?P<file>//[^#]+)#\d+ (?P<action>\w+)\s*$")
 
