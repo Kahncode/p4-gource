@@ -295,10 +295,11 @@ def fetch_p4_init(first_revision, out_base, include_paths, exclude_paths, regex_
 	search_paths = [format_perforce_search_path(path) for path in include_paths]
 
 	# Generate the Gource log file with fake initial revisions
-	with open(output_filename, "w") as f:
-		for path in search_paths:
-			cmd = p4_cmd(["files", "-e", f"{path}@{first_revision}"])
-			try:
+	try:
+		with open(output_filename, "w") as f:
+			for path in search_paths:
+				cmd = p4_cmd(["files", "-e", f"{path}@{first_revision}"])
+			
 				output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
 				if "no such file(s)" in output:
 					continue
@@ -312,12 +313,12 @@ def fetch_p4_init(first_revision, out_base, include_paths, exclude_paths, regex_
 							pretty_file = reduce_path(file, regex_match, regex_replace)
 							formatted_entry = f"0|init|{action_code}|{pretty_file}\n"
 							f.write(formatted_entry)
-			except subprocess.CalledProcessError as e:
-				print(f"Error running p4 files command for path {path}: {str(e)}")
-				# Remove the partially written file if it exists
-				if os.path.exists(output_filename):
-					os.remove(output_filename)
-				return None  # Or handle the error in another way
+	except subprocess.CalledProcessError as e:
+		print(f"Error running p4 files command for path {path}: {str(e)}")
+		# Remove the partially written file if it exists
+		if os.path.exists(output_filename):
+			os.remove(output_filename)
+		return None  # Or handle the error in another way
 	
 	print(f"Generated initial revisions file: {output_filename}")
 	return output_filename
@@ -417,7 +418,7 @@ def find_gource_executable():
 def run_gource(gource, gource_log_path, gource_args, interactive, output_video, out_base):
 	print("Running Gource")
 	base_cmd = [gource, gource_log_path]
-	
+
 	if gource_args:
 		base_cmd.extend(gource_args)
 
@@ -430,6 +431,7 @@ def run_gource(gource, gource_log_path, gource_args, interactive, output_video, 
 
 		base_cmd.extend(["-o", "-"])
 
+		# TODO: improve FFMPEG parameters as it produces video that are not compressed enough
 		ffmpeg_cmd = [
 			"ffmpeg", "-y", "-r", "60", "-f", "image2pipe", "-vcodec", "ppm", "-i", "-",
 			"-vcodec", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-crf", "1",
