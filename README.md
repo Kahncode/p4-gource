@@ -47,7 +47,7 @@ For more information or advanced use, see `--help`.
 ## Example Usage
 
 ```bash
-python p4-gource.py --p4-server <P4PORT> --p4-user <P4USER> --start-rev <start_revision> --end-rev <end_revision> --batch-size <batch_size> --output <output_directory> --gource-args "<custom_gource_arguments>"
+python p4-gource.py --p4-server <P4PORT> --p4-user <P4USER> --start-rev <start_revision> --end-rev <end_revision> --batch-size <batch_size> --output <output_root_name> --gource-args "<custom_gource_arguments>"
 ```
 
 ## License
