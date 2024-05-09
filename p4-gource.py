@@ -10,10 +10,25 @@ import subprocess
 import sys
 import time
 import platform
+import datetime
 
 p4_server = None
 p4_user = None
 verbose = False
+
+def print(*args, **kwargs):
+    timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    message = ' '.join(map(str, args))
+    prefixed_message = f"{timestamp} {message}"
+    if isinstance(__builtins__, dict):
+        # When __builtins__ is a dictionary, access print like this
+        builtins_print = __builtins__['print']
+    else:
+        # When __builtins__ is a module (usual case when running as a script), use it directly
+        builtins_print = __builtins__.print
+
+    # Call the built-in print function with the prefixed message and other keyword arguments
+    builtins_print(prefixed_message, **kwargs)
 
 def parse_args():
 	parser = argparse.ArgumentParser(description="Extract Perforce data to generate a visualization using Gource. Requires Gource (https://gource.io/).")
