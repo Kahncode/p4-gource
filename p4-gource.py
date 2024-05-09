@@ -134,41 +134,52 @@ def fetch_p4_log(ranges, out_base, include_paths, exclude_paths):
 					print(f"Fetching changelist {i}")
 
 				cmd = p4_cmd(["describe", "-s", str(i)])
-					
-				try:
-					cl = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-					# Check each line of the fetched log
-					changelist_description = ""
-					changelist_contains_files = False
-					for lineb in cl.splitlines():
-						try:
-							line = lineb.decode('utf-8')
-						except UnicodeDecodeError:
-							# Try decoding with a different encoding
-							line = lineb.decode('latin-1')
+				
+				max_retries = 5
+				retry_count = 0
+				success = False
+				while not success and retry_count < max_retries:
+					try:
+						cl = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+						# Check each line of the fetched log
+						changelist_description = ""
+						changelist_contains_files = False
+						for lineb in cl.splitlines():
+							try:
+								line = lineb.decode('utf-8')
+							except UnicodeDecodeError:
+								# Try decoding with a different encoding
+								line = lineb.decode('latin-1')
 
-						if not line:
-							continue 
+							if not line:
+								continue 
 
-						if "no such changelist" in line:
-							break # Skip this changelist, Perforce has many CL numbers not taken by actual changelists
+							if "no such changelist" in line:
+								break # Skip this changelist, Perforce has many CL numbers not taken by actual changelists
 
-						file_match = p4_file.match(line)
-						if file_match:
-							file_path = file_match.group("file")
-							if filter_file(file_path, include_paths, exclude_paths):
+							file_match = p4_file.match(line)
+							if file_match:
+								file_path = file_match.group("file")
+								if filter_file(file_path, include_paths, exclude_paths):
+									changelist_description += line + '\n'
+									changelist_contains_files = True
+							else:
 								changelist_description += line + '\n'
-								changelist_contains_files = True
-						else:
-							changelist_description += line + '\n'
 
-					if changelist_contains_files:
-						log_file.write(changelist_description)
-								
-				except Exception as e:
-						print(f"Error fetching changelist {i}: {str(e)}")
-						error_occurred = True
-						break  # Exit the changelist loop on error
+						if changelist_contains_files:
+							log_file.write(changelist_description)
+									
+					except Exception as e:
+							print(f"Error fetching changelist {i}: {str(e)}")
+							
+							retry_count += 1
+							print(f"Retry changelist {i} {retry_count}")
+					else:
+						success = True
+				
+				if not success:
+					error_occurred = True
+					break
 
 		if not error_occurred:
 			# Rename the temp log file to the final log file if no errors occurred
