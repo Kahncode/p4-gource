@@ -17,18 +17,18 @@ p4_user = None
 verbose = False
 
 def print(*args, **kwargs):
-    timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    message = ' '.join(map(str, args))
-    prefixed_message = f"{timestamp} {message}"
-    if isinstance(__builtins__, dict):
-        # When __builtins__ is a dictionary, access print like this
-        builtins_print = __builtins__['print']
-    else:
-        # When __builtins__ is a module (usual case when running as a script), use it directly
-        builtins_print = __builtins__.print
+	timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+	message = ' '.join(map(str, args))
+	prefixed_message = f"{timestamp} {message}"
+	if isinstance(__builtins__, dict):
+		# When __builtins__ is a dictionary, access print like this
+		builtins_print = __builtins__['print']
+	else:
+		# When __builtins__ is a module (usual case when running as a script), use it directly
+		builtins_print = __builtins__.print
 
-    # Call the built-in print function with the prefixed message and other keyword arguments
-    builtins_print(prefixed_message, **kwargs)
+	# Call the built-in print function with the prefixed message and other keyword arguments
+	builtins_print(prefixed_message, **kwargs)
 
 def parse_args():
 	parser = argparse.ArgumentParser(description="Extract Perforce data to generate a visualization using Gource. Requires Gource (https://gource.io/).")
@@ -142,7 +142,7 @@ def fetch_p4_log(ranges, out_base, include_paths, exclude_paths):
 		final_log_filename = f"{out_base}_{start}-{end}.p4.log"
 
 		print(f"Fetching changelists from {start} to {end}")
-		with open(temp_log_filename, "w", encoding='utf-8') as log_file:
+		with open(temp_log_filename, "w") as log_file:
 			error_occurred = False  # Flag to track if any error occurred
 			for i in range(start, end + 1):
 				if (i - start) % 100 == 99: # Just to keep printing for heartbeat to the user
@@ -160,11 +160,15 @@ def fetch_p4_log(ranges, out_base, include_paths, exclude_paths):
 						changelist_description = ""
 						changelist_contains_files = False
 						for lineb in cl.splitlines():
-							try:
-								line = lineb.decode('utf-8')
-							except UnicodeDecodeError:
-								# Try decoding with a different encoding
-								line = lineb.decode('latin-1')
+						
+							# Note that the encoding cannot be predicted here. 
+							# A P4 server which is not set to unicode will return whatever encoding the input was in without transforming it.
+							# Decode the byte data, replacing undecodable bytes with �
+							line = lineb.decode('utf-8', errors='replace')
+								
+							# Replace the Unicode replacement character with the desired replacement character
+							line = line.replace('\ufffd', '_')
+
 
 							if not line:
 								continue 
@@ -183,12 +187,14 @@ def fetch_p4_log(ranges, out_base, include_paths, exclude_paths):
 
 						if changelist_contains_files:
 							log_file.write(changelist_description)
-									
+
+					except UnicodeDecodeError as e:
+						print(f"Error decoding changelist {i}: {str(e)}")
 					except Exception as e:
-							print(f"Error fetching changelist {i}: {str(e)}")
+						print(f"Error fetching changelist {i}: {str(e)}")
 							
-							retry_count += 1
-							print(f"Retry changelist {i} {retry_count}")
+						retry_count += 1
+						print(f"Retry changelist {i} {retry_count}")
 					else:
 						success = True
 				
@@ -260,9 +266,9 @@ def reduce_path(path, regex_matches, regex_replaces):
 	return reduced_path
 
 # Compile regex patterns outside of the function to compile them only once
-p4_entry = re.compile(r"^Change \d+ by (?P<author>\S+)@\S+ on (?P<timestamp>\S+ \S+)\s*(?P<pending>\*pending\*)?\s*$")
+p4_entry = re.compile(r"^Change (?P<changelist>\d+) by (?P<author>\S+)@\S+ on (?P<timestamp>\S+ \S+)\s*(?P<pending>\*pending\*)?\s*$")
 p4_affected_files = re.compile(r"^Affected files ...\s*$")
-p4_file = re.compile(r"^... (?P<file>//[^#]+)#\d+ (?P<action>\w+)\s*$")
+p4_file = re.compile(r"^... (?P<file>//[^#]+)#\d+ (move/)?(?P<action>\w+)\s*$")
 
 p4_action_to_gource = {
 	"add": "A",
@@ -273,6 +279,32 @@ p4_action_to_gource = {
 	"purge": "D"
 }
 
+def convert_file_to_utf8_with_underscore(file_path):
+    """
+    Reads a binary file, attempts to decode it as UTF-8 replacing any undecodable bytes with '_',
+    and writes the output back to the same file in UTF-8 encoding.
+
+    Args:
+    file_path (str): The path to the file to be converted.
+    """
+    try:
+        # Read the file in binary mode
+        with open(file_path, 'rb') as file:
+            raw_data = file.read()
+        
+        # Decode the data, replace undecodable bytes with '_'
+        decoded_data = raw_data.decode('utf-8', errors='replace')
+        modified_data = decoded_data.replace('\ufffd', '_')
+        
+        # Write the modified data back to the file in UTF-8
+        with open(file_path, 'w', encoding='utf-8') as file:
+            file.write(modified_data)
+
+        print(f"Converted {file_path} to utf-8 successfully.")
+    
+    except Exception as e:
+        print(f"Failed to convert {file_path} to utf-8: {e}")
+
 def p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths, regex_match, regex_replace):
 	if os.path.exists(gource_log_path):
 		print(f"Using existing file {gource_log_path}")
@@ -280,7 +312,7 @@ def p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths, reg
 
 	""" Convert Perforce log to a Gource-compatible log format. """
 	print(f"Converting P4 to gource format: {p4_log_path} -> {gource_log_path}")
-	with open(p4_log_path, 'r') as p4_log, open(gource_log_path, 'w') as gource_log:
+	with open(p4_log_path, 'r', encoding='utf-8') as p4_log, open(gource_log_path, 'w') as gource_log:
 		author, timestamp, files, ignore_entry = None, None, False, False
 		line_count = 0
 		for line in p4_log:
@@ -293,6 +325,7 @@ def p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths, reg
 				if entry.group("pending"):
 					continue  # Skip pending entries as they have not been submitted
 				author = entry.group("author").lower()
+				changelist = entry.group("changelist")
 				timestamp = int(time.mktime(time.strptime(entry.group("timestamp"), "%Y/%m/%d %H:%M:%S")))
 				files = False  # Reset file processing
 				continue
@@ -309,6 +342,14 @@ def p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths, reg
 					formatted_entry = f"{timestamp}|{author}|{action_code}|{pretty_file}\n"
 					gource_log.write(formatted_entry)
 
+def p4_to_gource_safe(p4_log_path, gource_log_path, include_paths, exclude_paths, regex_match, regex_replace):
+	try:
+		p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths, regex_match, regex_replace)
+	except UnicodeDecodeError:
+		if os.path.exists(gource_log_path):
+			os.remove(gource_log_path)
+		convert_file_to_utf8_with_underscore(p4_log_path)
+		p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths, regex_match, regex_replace)
 
 def fetch_p4_init(first_revision, out_base, include_paths, exclude_paths, regex_match, regex_replace):
 	output_filename = f"{out_base}_init_{first_revision}.gource"
@@ -379,12 +420,18 @@ def select_logs_for_range(p4_logs, start_rev, end_rev):
 
 	return selected_files
 
-def concatenate_gource_logs(gource_files, final_gource_log):
+def concatenate_gource_logs(gource_files, target_gource_filename):
 	""" Concatenate Gource files into one final log. """
-	with open(final_gource_log, 'w') as outfile:
+	""" Note that this can make a mess if the target_gource_filename is in gource_files """
+	if target_gource_filename in gource_files:
+		print(f"Using existing full log file {target_gource_filename}")
+		return
+	
+	with open(target_gource_filename, 'w') as outfile:
 		for filename in gource_files:
 			with open(filename, 'r') as infile:
 				outfile.write(infile.read())
+	print(f"Gource full log file created at {target_gource_filename}")
 
 def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths, skip_init, regex_match, regex_replace):
 	target_gource_filename = f"{out_base}_{start_rev}-{end_rev}.gource"
@@ -399,7 +446,7 @@ def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths, 
 	gource_files = []
 	for key, p4_log_path in selected_logs.items():
 		gource_log_path = p4_log_path.replace('.p4.log', '.gource')
-		p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths, regex_match, regex_replace)
+		p4_to_gource_safe(p4_log_path, gource_log_path, include_paths, exclude_paths, regex_match, regex_replace)
 		gource_files.append(gource_log_path)
 
 	actual_range = list(selected_logs.keys())
@@ -411,7 +458,8 @@ def generate_gource(start_rev, end_rev, out_base, include_paths, exclude_paths, 
 
 	target_gource_filename = f"{out_base}_{actual_range[0][0]}-{actual_range[-1][1]}.gource"
 	concatenate_gource_logs(gource_files, target_gource_filename)
-	print(f"Gource file created at {target_gource_filename}")
+
+
 	print(f"Actual revision range covered: {actual_range[0][0]} to {actual_range[-1][1]}")
 	return target_gource_filename
 
@@ -488,7 +536,7 @@ if __name__ == "__main__":
 				# Convert fetched logs to Gource logs
 				for p4_log_path in fetched_files:
 					gource_log_path = p4_log_path.replace('.p4.log', '.gource')
-					p4_to_gource(p4_log_path, gource_log_path, args.include_path, args.exclude_path, args.regex_match, args.regex_replace)
+					p4_to_gource_safe(p4_log_path, gource_log_path, args.include_path, args.exclude_path, args.regex_match, args.regex_replace)
 			else:
 				print(f"All revisions already fetched")
 		else: 
