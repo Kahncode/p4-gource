@@ -142,7 +142,7 @@ def fetch_p4_log(ranges, out_base, include_paths, exclude_paths):
 		final_log_filename = f"{out_base}_{start}-{end}.p4.log"
 
 		print(f"Fetching changelists from {start} to {end}")
-		with open(temp_log_filename, "w") as log_file:
+		with open(temp_log_filename, 'w', encoding='utf-8') as log_file:
 			error_occurred = False  # Flag to track if any error occurred
 			for i in range(start, end + 1):
 				if (i - start) % 100 == 99: # Just to keep printing for heartbeat to the user
@@ -312,7 +312,7 @@ def p4_to_gource(p4_log_path, gource_log_path, include_paths, exclude_paths, reg
 
 	""" Convert Perforce log to a Gource-compatible log format. """
 	print(f"Converting P4 to gource format: {p4_log_path} -> {gource_log_path}")
-	with open(p4_log_path, 'r', encoding='utf-8') as p4_log, open(gource_log_path, 'w') as gource_log:
+	with open(p4_log_path, 'r', encoding='utf-8') as p4_log, open(gource_log_path, 'w', encoding='utf-8') as gource_log:
 		author, timestamp, files, ignore_entry = None, None, False, False
 		line_count = 0
 		for line in p4_log:
@@ -363,7 +363,7 @@ def fetch_p4_init(first_revision, out_base, include_paths, exclude_paths, regex_
 
 	# Generate the Gource log file with fake initial revisions
 	try:
-		with open(output_filename, "w") as f:
+		with open(output_filename, 'w', encoding='utf-8') as f:
 			for path in search_paths:
 				cmd = p4_cmd(["files", "-e", f"{path}@{first_revision}"])
 			
@@ -427,7 +427,7 @@ def concatenate_gource_logs(gource_files, target_gource_filename):
 		print(f"Using existing full log file {target_gource_filename}")
 		return
 	
-	with open(target_gource_filename, 'w') as outfile:
+	with open(target_gource_filename, 'w', encoding='utf-8') as outfile:
 		for filename in gource_files:
 			with open(filename, 'r') as infile:
 				outfile.write(infile.read())
